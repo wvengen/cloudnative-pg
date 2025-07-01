@@ -66,6 +66,11 @@ const backupPhase = ".status.phase"
 // where the name of the cluster is written
 const clusterName = ".spec.cluster.name"
 
+// isRunningResult ensures that we periodically check running backups. It could happen that the targetPod is destroyed
+// or stops responding.
+// This should be used almost always when a backup is running
+var isRunningResult = ctrl.Result{RequeueAfter: 10 * time.Minute}
+
 // BackupReconciler reconciles a Backup object
 type BackupReconciler struct {
 	client.Client
@@ -209,7 +214,9 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			tryFlagBackupAsFailed(ctx, r.Client, &backup, fmt.Errorf("while ensuring target pod is healthy: %w", err))
 			r.Recorder.Eventf(&backup, "Warning", "TargetPodNotHealthy",
 				"Error ensuring target pod is healthy: %s", err.Error())
-			return ctrl.Result{}, nil
+			// this ensures that we will retry in case of errors
+			// if everything was flagged correctly we will not come back again in this state
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 	}
 
@@ -221,7 +228,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 
 		if isRunning {
-			return ctrl.Result{}, nil
+			return isRunningResult, nil
 		}
 
 		r.Recorder.Eventf(&backup, "Normal", "Starting",
@@ -230,7 +237,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	if backup.Spec.Method == apiv1.BackupMethodPlugin {
 		if isRunning {
-			return ctrl.Result{}, nil
+			return isRunningResult, nil
 		}
 
 		r.Recorder.Eventf(&backup, "Normal", "Starting",
